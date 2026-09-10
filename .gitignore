@@ -1,0 +1,26 @@
+# dependencies / builds
+node_modules/
+dist/
+build/
+*.tsbuildinfo
+
+# codex upstream clone — reference only, never modify, keep out of git
+/codex/
+
+# engine-local state & secrets
+.codex/
+.auth/
+*.local
+.env
+.env.*
+!.env.example
+
+# logs
+*.log
+logs/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
