@@ -1,26 +1,13 @@
-# dependencies / builds
 node_modules/
 dist/
-build/
+out/
+release/
+*.log
 *.tsbuildinfo
 
-# codex upstream clone — reference only, never modify, keep out of git
-/codex/
+# Protocol bindings are generated from the installed Codex CLI (npm run gen:protocol).
+packages/codex-protocol/src/generated/
 
-# engine-local state & secrets
-.codex/
-.auth/
-*.local
-.env
-.env.*
-!.env.example
-
-# logs
-*.log
-logs/
-
-# OS / editor
-.DS_Store
-Thumbs.db
-.vscode/
-.idea/
+# Reference checkout of the upstream OpenAI Codex repo (~700 MB, has its own .git).
+# Read-only reference: never vendored into this repo.
+codex/

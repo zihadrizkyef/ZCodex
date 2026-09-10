@@ -1,0 +1,14 @@
+{
+  "name": "@zcodex/codex-client",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Node client for the Codex app-server (JSON-RPC over stdio).",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -b"
+  },
+  "dependencies": {
+    "@zcodex/codex-protocol": "*"
+  }
+}

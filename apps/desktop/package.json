@@ -1,0 +1,18 @@
+{
+  "name": "@zcodex/desktop",
+  "productName": "ZCodex",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Electron main + preload process for ZCodex.",
+  "main": "dist/main.js",
+  "scripts": {
+    "build": "tsc -b"
+  },
+  "dependencies": {
+    "@zcodex/codex-client": "*",
+    "@zcodex/contracts": "*"
+  },
+  "devDependencies": {
+    "electron": "^44.3.0"
+  }
+}

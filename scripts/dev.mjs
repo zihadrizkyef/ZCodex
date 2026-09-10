@@ -1,51 +1,87 @@
-// Dev launcher: starts the harness server + the Vite GUI together, so
-// `npm run dev` at the repo root is the whole dev loop. Ctrl-C (SIGINT) stops both.
-import { spawn } from 'node:child_process';
-import * as path from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { existsSync } from 'node:fs';
+// Dev launcher: generate bindings (if needed) -> build TS -> Vite dev server -> Electron.
+// Every child is spawned as node.exe/electron.exe directly: on Windows, shelling out to
+// npm.cmd/npx throws EINVAL and breaks Ctrl-C propagation.
+import { spawn, spawnSync } from "node:child_process";
+import { createRequire } from "node:module";
+import { existsSync } from "node:fs";
+import net from "node:net";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const guiDir = path.join(root, 'apps', 'gui');
+const require = createRequire(import.meta.url);
+const here = path.dirname(fileURLToPath(import.meta.url));
+const repo = path.resolve(here, "..");
+const rendererDir = path.join(repo, "apps", "renderer");
+const forwarded = process.argv.slice(2);
+const DEBUG_PORT = process.env.ZCODEX_DEBUG_PORT;
 
-const children = [];
+function run(command, args, options = {}) {
+  const res = spawnSync(command, args, { stdio: "inherit", cwd: repo, ...options });
+  if (res.status !== 0) process.exit(res.status ?? 1);
+}
 
-function start(name, args, cwd) {
-  const child = spawn(process.execPath, args, { cwd, stdio: ['ignore', 'pipe', 'pipe'], shell: false });
-  child.stdout?.on('data', (d) => process.stdout.write(`[${name}] ${d}`));
-  child.stderr?.on('data', (d) => process.stderr.write(`[${name}] ${d}`));
-  child.on('exit', (code) => {
-    console.log(`[${name}] exited (${code})`);
-    shutdown(code ?? 0);
+function waitForPort(port, timeoutMs = 60_000) {
+  const deadline = Date.now() + timeoutMs;
+  return new Promise((resolve, reject) => {
+    const attempt = () => {
+      const socket = net.connect({ host: "127.0.0.1", port }, () => {
+        socket.end();
+        resolve();
+      });
+      socket.on("error", () => {
+        socket.destroy();
+        if (Date.now() > deadline) reject(new Error(`Vite tidak siap di port ${port}`));
+        else setTimeout(attempt, 250);
+      });
+    };
+    attempt();
   });
-  children.push(child);
-  return child;
 }
 
-let shuttingDown = false;
-function shutdown(code) {
-  if (shuttingDown) return;
-  shuttingDown = true;
-  for (const c of children) {
-    try {
-      c.kill();
-    } catch {}
-  }
-  process.exit(code);
+// 1. protocol bindings
+if (!existsSync(path.join(repo, "packages", "codex-protocol", "src", "generated", "index.ts"))) {
+  console.log("[dev] bindings belum ada — generate dari CLI Codex terpasang…");
+  run(process.execPath, [path.join(repo, "packages", "codex-protocol", "scripts", "generate.mjs")]);
 }
 
-process.on('SIGINT', () => shutdown(0));
-process.on('SIGTERM', () => shutdown(0));
+// 2. main/preload/packages
+console.log("[dev] tsc -b …");
+run(process.execPath, [path.join(repo, "node_modules", "typescript", "bin", "tsc"), "-b"]);
+run(process.execPath, [path.join(repo, "scripts", "build-preload.mjs")]);
 
-// Harness server (WS bridge on 127.0.0.1:4123) from the built output.
-start('server', [path.join(root, 'apps', 'harness-server', 'dist', 'index.js')], root);
+// 3. renderer dev server
+console.log("[dev] vite dev server…");
+const vite = spawn(
+  process.execPath,
+  [path.join(repo, "node_modules", "vite", "bin", "vite.js"), "--config", path.join(rendererDir, "vite.config.ts")],
+  { cwd: rendererDir, stdio: ["ignore", "inherit", "inherit"], env: process.env },
+);
+vite.on("exit", (code) => {
+  if (code !== 0 && code !== null) console.error(`[dev] vite keluar dengan kode ${code}`);
+  process.exit(code ?? 0);
+});
 
-// Vite dev server for the GUI — invoke vite's CLI directly via node (no shell shim needed).
-const viteBin = path.join(root, 'node_modules', 'vite', 'bin', 'vite.js');
-if (!existsSync(viteBin)) {
-  console.error('vite not found — run `npm install` first.');
-  shutdown(1);
-}
-start('gui', [viteBin], guiDir);
+await waitForPort(5173);
 
-console.log('zcodex dev — harness server + GUI. Open http://localhost:5173/  (Ctrl-C to stop)');
+// 4. electron
+const electronPath = require("electron");
+const electronArgs = [path.join(repo, "apps", "desktop")];
+if (DEBUG_PORT) electronArgs.push(`--remote-debugging-port=${DEBUG_PORT}`);
+electronArgs.push(...forwarded);
+console.log(`[dev] electron ${electronPath} ${electronArgs.join(" ")}`);
+const electron = spawn(electronPath, electronArgs, {
+  stdio: "inherit",
+  env: { ...process.env, ZCODEX_DEV_URL: "http://127.0.0.1:5173" },
+});
+
+const shutdown = () => {
+  if (!electron.killed) electron.kill();
+  if (!vite.killed) vite.kill();
+};
+process.on("SIGINT", shutdown);
+process.on("SIGTERM", shutdown);
+
+electron.on("exit", (code) => {
+  shutdown();
+  process.exit(code ?? 0);
+});

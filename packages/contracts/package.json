@@ -1,0 +1,14 @@
+{
+  "name": "@zcodex/contracts",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Shared IPC contract, view models and the pure thread reducer used by main + renderer.",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -b"
+  },
+  "dependencies": {
+    "@zcodex/codex-protocol": "*"
+  }
+}
