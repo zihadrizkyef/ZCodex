@@ -154,7 +154,7 @@ function engineOf(thread: Thread): "codex" | "claude" {
 }
 
 /** Build a thread state from a `thread/read`-style payload (full turn history). */
-export function hydrateThread(thread: Thread): ThreadState {
+export function hydrateThread(thread: Thread, effortOverride?: string | null): ThreadState {
   const items: ItemView[] = [];
   for (const turn of thread.turns ?? []) {
     for (const item of turn.items ?? []) items.push(toItemView(item));
@@ -168,7 +168,10 @@ export function hydrateThread(thread: Thread): ThreadState {
     engine: engineOf(thread),
     title: thread.name ?? null,
     cwd: thread.cwd ?? "",
-    effort: null,
+    // Codex threads carry their current effort directly on the thread; Claude threads are null
+    // here and get it from `effortOf()` in readThread. `effortOverride` is the pending selection
+    // for a fresh thread (used by the composer before the first turn is sent).
+    effort: effortOverride ?? thread.reasoningEffort ?? null,
     phase: statusType === "systemError" ? "error" : statusType === "active" ? "working" : "idle",
     items,
     activeTurnId: lastTurn?.status === "inProgress" ? lastTurn.id : null,

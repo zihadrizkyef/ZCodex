@@ -202,7 +202,7 @@ export function registerIpc(ctx: IpcContext): void {
       models,
       claudeModels,
       engines: [
-        { id: "codex", label: "Codex", available: host.isReady, version: host.info?.version ?? null },
+        { id: "codex", label: "ChatGPT", available: host.isReady, version: host.info?.version ?? null },
         {
           id: "claude",
           label: "Claude",
@@ -296,7 +296,7 @@ export function registerIpc(ctx: IpcContext): void {
     if (claudeThread) return { thread: claudeThread, effort: claude.effortOf(threadId) };
     const client = host.require();
     const res = await client.readThread(threadId, true);
-    return { thread: res.thread };
+    return { thread: res.thread, effort: res.thread.reasoningEffort ?? null };
   });
 
   ipcMain.handle(IPC.newThread, async (_event, request: NewThreadRequest) => {
@@ -350,12 +350,13 @@ export function registerIpc(ctx: IpcContext): void {
     await client.startTurn({
       threadId: request.threadId,
       model: request.model ?? null,
+      effort: request.effort ?? null,
       input: [{ type: "text", text: request.text, text_elements: [] }],
     });
   });
 
   ipcMain.handle(IPC.setEffort, async (_event, threadId: string, level: string) => {
-    if (engineOfThreadId(threadId, ctx) !== "claude") return; // codex effort is part of the model choice
+    if (engineOfThreadId(threadId, ctx) !== "claude") return; // effort ChatGPT (codex) diterapkan di turn/start
     claude.setEffort(threadId, level);
   });
 

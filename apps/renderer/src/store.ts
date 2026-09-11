@@ -260,7 +260,11 @@ export const useStore = create<State>((set, get) => ({
         approvalPolicy: get().autoApprove ? "on-request" : "untrusted",
         sandbox: "workspace-write",
       });
-      set({ view: "thread", thread: hydrateThread(thread), openingThreadId: null });
+      set({
+        view: "thread",
+        thread: hydrateThread(thread, request.effort ?? get().selectedEffort),
+        openingThreadId: null,
+      });
       await get().refreshThreads();
     } catch (err) {
       set({ notice: err instanceof Error ? err.message : String(err) });
@@ -306,7 +310,12 @@ export const useStore = create<State>((set, get) => ({
     };
     set({ thread: optimistic, composerDraft: "" });
     try {
-      await window.zcodex.startTurn({ threadId: thread.threadId, text, model: get().selectedModel });
+      await window.zcodex.startTurn({
+        threadId: thread.threadId,
+        text,
+        model: get().selectedModel,
+        effort: thread.effort ?? get().selectedEffort,
+      });
     } catch (err) {
       set({ notice: err instanceof Error ? err.message : String(err) });
     }
@@ -350,12 +359,16 @@ export const useStore = create<State>((set, get) => ({
   applyEffort: async (level) => {
     const { thread } = get();
     set({ selectedEffort: level });
-    if (!thread || thread.engine !== "claude") return;
+    if (!thread) return;
+    // Claude applies the change live over the control channel; ChatGPT (Codex) records it on the
+    // thread and it takes effect at the next turn/start — `send()` forwards it for both.
     set({ thread: { ...thread, effort: level } });
-    try {
-      await window.zcodex.setEffort(thread.threadId, level);
-    } catch (err) {
-      set({ notice: err instanceof Error ? err.message : String(err) });
+    if (thread.engine === "claude") {
+      try {
+        await window.zcodex.setEffort(thread.threadId, level);
+      } catch (err) {
+        set({ notice: err instanceof Error ? err.message : String(err) });
+      }
     }
   },
 

@@ -170,7 +170,7 @@ export interface ThreadState {
   engine: EngineId;
   title: string | null;
   cwd: string;
-  /** Manual effort level for engines that expose one (Claude). */
+  /** Current reasoning-effort level on this thread, when the engine tracks one. */
   effort: string | null;
   phase: ThreadPhase;
   items: ItemView[];
@@ -209,6 +209,8 @@ export interface StartTurnRequest {
   threadId: string;
   text: string;
   model?: string | null;
+  /** Reasoning effort to apply for this turn and subsequent ones (Codex applies it at turn/start). */
+  effort?: string | null;
 }
 
 export interface ApprovalResponseRequest {

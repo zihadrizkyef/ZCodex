@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowUp, Check, ChevronDown, Folder, Mic, Plus, Square } from "lucide-react";
 import type { EngineId } from "@zcodex/contracts";
+import { ENGINE_LABELS, engineEffortLevels } from "@zcodex/contracts";
 import { useStore } from "../store";
 import { Dropdown, MenuItem } from "./Dropdown";
 import { EffortSlider, effortLabel } from "./EffortSlider";
@@ -48,8 +49,9 @@ export function Composer(): React.ReactElement {
   const engine: EngineId = thread?.engine ?? selectedEngine;
   const availableModels = engine === "claude" ? claudeModels : models;
   const model = useMemo(() => availableModels.find((m) => m.id === selectedModel), [availableModels, selectedModel]);
-  // Claude exposes a manual effort dial per model; Codex carries effort inside the model choice.
-  const effortLevels = engine === "claude" && model?.supportsEffort ? (model.effortLevels ?? []) : [];
+  // Effort is a manual dial per provider whenever its catalogue reports levels for the model
+  // (Claude: `effortLevels`; ChatGPT/Codex: `supportedReasoningEfforts` from `model/list`).
+  const effortLevels = engineEffortLevels(model);
   const effortValue = useMemo(() => {
     if (!effortLevels.length) return null;
     const fromThread = thread?.effort ?? null;
@@ -168,15 +170,15 @@ export function Composer(): React.ReactElement {
             </button>
             <span className="spacer" />
             {thread ? (
-              <span className="chip engine-chip" title={`Thread ini dijalankan lewat ${engine === "claude" ? "Claude Code" : "Codex"}`}>
-                {engine === "claude" ? "Claude" : "Codex"}
+              <span className="chip engine-chip" title={`Thread ini dijalankan lewat ${ENGINE_LABELS[engine]}`}>
+                {ENGINE_LABELS[engine]}
               </span>
             ) : (
               <Dropdown
                 className="chip engine-chip"
                 label={
                   <>
-                    {engine === "claude" ? "Claude" : "Codex"}
+                    {ENGINE_LABELS[engine]}
                     <ChevronDown size={12} />
                   </>
                 }
@@ -184,7 +186,7 @@ export function Composer(): React.ReactElement {
                 {(close) => (
                   <>
                     <MenuItem active={engine === "codex"} onClick={() => { setSelectedEngine("codex"); close(); }}>
-                      Codex
+                      ChatGPT
                     </MenuItem>
                     <MenuItem active={engine === "claude"} onClick={() => { setSelectedEngine("claude"); close(); }}>
                       Claude
@@ -198,7 +200,7 @@ export function Composer(): React.ReactElement {
               align="right"
               label={
                 <>
-                  {modelLabel(model, engine === "claude" ? "" : undefined)}
+                  {modelLabel(model, "")}
                   <ChevronDown size={12} />
                 </>
               }
@@ -206,7 +208,7 @@ export function Composer(): React.ReactElement {
               {(close) => (
                 <>
                   {availableModels.filter((m) => !m.hidden).length === 0 ? (
-                    <MenuItem onClick={close}>{engine === "claude" ? "Default Claude" : "Default Codex"}</MenuItem>
+                    <MenuItem onClick={close}>{engine === "claude" ? "Default Claude" : "Default ChatGPT"}</MenuItem>
                   ) : null}
                   {availableModels
                     .filter((m) => !m.hidden)

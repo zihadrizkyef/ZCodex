@@ -62,7 +62,7 @@ export function ThreadView(): React.ReactElement {
           {thread.phase === "working" ? (
             <div className="working">
               <span className="dot" />
-              Codex sedang bekerja…
+              ChatGPT sedang bekerja…
               {usage?.outputTokens ? <span style={{ color: "var(--text-faint)" }}>({usage.outputTokens} token output)</span> : null}
             </div>
           ) : null}
@@ -88,7 +88,7 @@ export function ThreadView(): React.ReactElement {
         <div className="composer-wrap" style={{ paddingBottom: 0 }}>
           <div className="banner warn" style={{ margin: "0 0 8px" }}>
             <AlertTriangle size={14} />
-            Kuota Codex terpakai {rateLimit.usedPercent}% ({rateLimit.planType ?? "?"} plan). Sisa window{" "}
+            Kuota ChatGPT terpakai {rateLimit.usedPercent}% ({rateLimit.planType ?? "?"} plan). Sisa window{" "}
             {rateLimit.windowDurationMins ? `${Math.round(rateLimit.windowDurationMins / 60)} jam` : "?"}.
           </div>
         </div>
