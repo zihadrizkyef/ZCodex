@@ -179,6 +179,7 @@ export function installDevBridge(): boolean {
     startTurn: async () => {
       window.dispatchEvent(new CustomEvent("zcodex:demo-notification", { detail: DEMO_APPROVAL }));
     },
+    setEffort: async () => undefined,
     interruptTurn: async () => undefined,
     respondApproval: async () => undefined,
     popupMenu: async () => undefined,
@@ -187,6 +188,7 @@ export function installDevBridge(): boolean {
     onNotification: () => () => undefined,
     onServerRequest: () => () => undefined,
     onStatus: () => () => undefined,
+    onClaudeStatus: () => () => undefined,
     onProjectsChanged: () => () => undefined,
     onCommand: () => () => undefined,
   };

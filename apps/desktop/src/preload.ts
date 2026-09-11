@@ -37,6 +37,7 @@ const api: ZCodexApi = {
   renameThread: (threadId: string, name: string) => ipcRenderer.invoke(IPC.renameThread, threadId, name) as Promise<void>,
   archiveThread: (threadId: string) => ipcRenderer.invoke(IPC.archiveThread, threadId) as Promise<void>,
   startTurn: (request: StartTurnRequest) => ipcRenderer.invoke(IPC.startTurn, request) as Promise<void>,
+  setEffort: (threadId: string, level: string) => ipcRenderer.invoke(IPC.setEffort, threadId, level) as Promise<void>,
   interruptTurn: (threadId: string, turnId: string) => ipcRenderer.invoke(IPC.interruptTurn, threadId, turnId) as Promise<void>,
   respondApproval: (request: ApprovalResponseRequest) => ipcRenderer.invoke(IPC.respondApproval, request) as Promise<void>,
   popupMenu: (menu: MenuId, x: number, y: number) => ipcRenderer.invoke(IPC.popupMenu, menu, x, y) as Promise<void>,
@@ -45,6 +46,7 @@ const api: ZCodexApi = {
   onNotification: subscribe<ServerNotification>(IPC.onNotification),
   onServerRequest: subscribe<ServerRequest>(IPC.onServerRequest),
   onStatus: subscribe<CodexStatusView>(IPC.onStatus),
+  onClaudeStatus: subscribe<CodexStatusView>(IPC.onClaudeStatus),
   onProjectsChanged: subscribe<ProjectView[]>(IPC.onProjectsChanged),
   onCommand: subscribe<AppCommand>(IPC.onCommand),
 };

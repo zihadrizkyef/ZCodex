@@ -22,6 +22,7 @@ export interface ThreadSummary {
   updatedAt: number;
   model: string | null;
   source: string;
+  engine: EngineId;
   status: "notLoaded" | "idle" | "systemError" | "active";
 }
 
@@ -33,6 +34,11 @@ export interface ModelOption {
   isDefault: boolean;
   reasoningEfforts: string[];
   defaultReasoningEffort: string | null;
+  /** Engines with a manual effort dial (Claude): levels the model accepts, in order. */
+  effortLevels?: string[];
+  supportsEffort?: boolean;
+  /** Extra note shown at the right edge of the row (e.g. "1M context"). */
+  hint?: string | null;
 }
 
 export interface AccountView {
@@ -60,11 +66,26 @@ export interface CodexStatusView {
   codexHome?: string | null;
 }
 
+/** Which agent engine a thread belongs to. */
+export type EngineId = "codex" | "claude";
+
+export interface EngineStatusView {
+  id: EngineId;
+  label: string;
+  available: boolean;
+  version: string | null;
+  detail?: string;
+}
+
 export interface BootstrapPayload {
   status: CodexStatusView;
   account: AccountView | null;
   rateLimit: RateLimitView | null;
   models: ModelOption[];
+  /** Model choices for the Claude engine (aliases accepted by `claude --model`). */
+  claudeModels: ModelOption[];
+  /** Engines the user can chat with, with availability. */
+  engines: EngineStatusView[];
   projects: ProjectView[];
   recentThreads: ThreadSummary[];
   threadProjectHints: Record<string, string>;
@@ -146,8 +167,11 @@ export interface TokenUsageView {
 
 export interface ThreadState {
   threadId: string;
+  engine: EngineId;
   title: string | null;
   cwd: string;
+  /** Manual effort level for engines that expose one (Claude). */
+  effort: string | null;
   phase: ThreadPhase;
   items: ItemView[];
   activeTurnId: string | null;
@@ -174,7 +198,9 @@ export interface ListThreadsRequest {
 export interface NewThreadRequest {
   projectId: string | null;
   cwd?: string;
+  engine?: EngineId;
   model?: string | null;
+  effort?: string | null;
   approvalPolicy?: "untrusted" | "on-request" | "never";
   sandbox?: "read-only" | "workspace-write" | "danger-full-access";
 }
@@ -194,6 +220,8 @@ export interface ApprovalResponseRequest {
 
 export interface RawThreadPayload {
   thread: Thread;
+  /** Effort level the engine session currently runs at (Claude). */
+  effort?: string | null;
 }
 
 /** The `window.zcodex` bridge exposed by the preload script. */
@@ -208,6 +236,8 @@ export interface ZCodexApi {
   renameThread(threadId: string, name: string): Promise<void>;
   archiveThread(threadId: string): Promise<void>;
   startTurn(request: StartTurnRequest): Promise<void>;
+  /** Change the manual effort level of a Claude thread (applies to the live session). */
+  setEffort(threadId: string, level: string): Promise<void>;
   interruptTurn(threadId: string, turnId: string): Promise<void>;
   respondApproval(request: ApprovalResponseRequest): Promise<void>;
   popupMenu(menu: MenuId, x: number, y: number): Promise<void>;
@@ -216,6 +246,7 @@ export interface ZCodexApi {
   onNotification(handler: (notification: ServerNotification) => void): () => void;
   onServerRequest(handler: (request: ServerRequest) => void): () => void;
   onStatus(handler: (status: CodexStatusView) => void): () => void;
+  onClaudeStatus(handler: (status: CodexStatusView) => void): () => void;
   onProjectsChanged(handler: (projects: ProjectView[]) => void): () => void;
   onCommand(handler: (command: AppCommand) => void): () => void;
 }

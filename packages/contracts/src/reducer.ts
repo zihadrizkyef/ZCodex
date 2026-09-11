@@ -124,6 +124,12 @@ export function toItemView(item: ThreadItem): ItemView {
 }
 
 export function threadToSummary(thread: Thread, projectId: string | null = null): ThreadSummary {
+  const rawSource =
+    typeof thread.source === "string"
+      ? thread.source
+      : thread.source && typeof thread.source === "object" && "custom" in thread.source && typeof thread.source.custom === "string"
+        ? (thread.source.custom as string)
+        : (thread.source as { type?: string } | null)?.type ?? "unknown";
   return {
     id: thread.id,
     name: thread.name ?? null,
@@ -133,9 +139,18 @@ export function threadToSummary(thread: Thread, projectId: string | null = null)
     createdAt: thread.createdAt ?? 0,
     updatedAt: thread.updatedAt ?? 0,
     model: thread.model ?? null,
-    source: typeof thread.source === "string" ? thread.source : (thread.source as { type?: string })?.type ?? "unknown",
+    source: rawSource,
+    engine: rawSource === "claude" ? "claude" : "codex",
     status: (thread.status?.type ?? "idle") as ThreadSummary["status"],
   };
+}
+
+/** Engine a thread belongs to, from its protocol source. */
+function engineOf(thread: Thread): "codex" | "claude" {
+  if (typeof thread.source === "object" && thread.source && "custom" in thread.source && thread.source.custom === "claude") {
+    return "claude";
+  }
+  return "codex";
 }
 
 /** Build a thread state from a `thread/read`-style payload (full turn history). */
@@ -150,8 +165,10 @@ export function hydrateThread(thread: Thread): ThreadState {
   if (lastTurn?.status === "failed" && lastTurn.error) error = lastTurn.error.message;
   return {
     threadId: thread.id,
+    engine: engineOf(thread),
     title: thread.name ?? null,
     cwd: thread.cwd ?? "",
+    effort: null,
     phase: statusType === "systemError" ? "error" : statusType === "active" ? "working" : "idle",
     items,
     activeTurnId: lastTurn?.status === "inProgress" ? lastTurn.id : null,
@@ -165,11 +182,13 @@ export function hydrateThread(thread: Thread): ThreadState {
   };
 }
 
-export function emptyThreadState(threadId: string, cwd: string): ThreadState {
+export function emptyThreadState(threadId: string, cwd: string, engine: "codex" | "claude" = "codex"): ThreadState {
   return {
     threadId,
+    engine,
     title: null,
     cwd,
+    effort: null,
     phase: "loading",
     items: [],
     activeTurnId: null,

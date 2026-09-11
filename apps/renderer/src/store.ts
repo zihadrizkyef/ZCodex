@@ -9,6 +9,8 @@ import {
   type ApprovalView,
   type BootstrapPayload,
   type CodexStatusView,
+  type EngineId,
+  type EngineStatusView,
   type ModelOption,
   type ProjectView,
   type RateLimitView,
@@ -18,6 +20,19 @@ import {
 import type { ServerNotification, ServerRequest } from "@zcodex/codex-protocol";
 
 const READ_THREADS_KEY = "zcodex.readThreads";
+
+/**
+ * Pick a Claude model id that exists in the current catalogue.
+ *
+ * Threads remember the alias they were started with, and the catalogue's alias set is not stable
+ * (the CLI drops redundant aliases — a thread started with `default` finds no such row once the
+ * `default`/`sonnet` duplicate is collapsed). Falling back to the default row keeps the composer
+ * chip and the effort dial working for those threads instead of going blank.
+ */
+function claudeModelFor(models: ModelOption[], wanted: string | null): string | null {
+  if (wanted && models.some((m) => m.id === wanted)) return wanted;
+  return models.find((m) => m.isDefault)?.id ?? models[0]?.id ?? wanted;
+}
 
 function loadReadThreads(): Set<string> {
   try {
@@ -42,10 +57,16 @@ interface State {
   booted: boolean;
   bootError: string | null;
   status: CodexStatusView;
+  claudeStatus: CodexStatusView;
+  engines: EngineStatusView[];
   account: AccountView | null;
   rateLimit: RateLimitView | null;
   models: ModelOption[];
+  claudeModels: ModelOption[];
   selectedModel: string | null;
+  selectedEngine: EngineId;
+  /** Manual effort level for the next Claude chat (null = the CLI's own default). */
+  selectedEffort: string | null;
   projects: ProjectView[];
   threads: ThreadSummary[];
   threadProjectHints: Record<string, string>;
@@ -66,6 +87,7 @@ interface State {
   handleNotification: (notification: ServerNotification) => void;
   handleServerRequest: (request: ServerRequest) => void;
   handleStatus: (status: CodexStatusView) => void;
+  handleClaudeStatus: (status: CodexStatusView) => void;
   setProjects: (projects: ProjectView[]) => void;
   bootstrap: () => Promise<void>;
   refreshThreads: (searchTerm?: string) => Promise<void>;
@@ -81,6 +103,9 @@ interface State {
   interrupt: () => Promise<void>;
   answerApproval: (approval: ApprovalView, decision: string, answers?: Record<string, string[]>) => Promise<void>;
   setSelectedModel: (model: string) => void;
+  setSelectedEngine: (engine: EngineId) => void;
+  /** Set the effort level for the open Claude thread (applies live) or for the next chat. */
+  applyEffort: (level: string) => Promise<void>;
   setSelectedProject: (projectId: string | null) => void;
   setSearchOpen: (open: boolean) => void;
   setAutoApprove: (value: boolean) => void;
@@ -92,10 +117,15 @@ export const useStore = create<State>((set, get) => ({
   booted: false,
   bootError: null,
   status: { state: "starting" },
+  claudeStatus: { state: "starting" },
+  engines: [],
   account: null,
   rateLimit: null,
   models: [],
+  claudeModels: [],
   selectedModel: null,
+  selectedEngine: "codex",
+  selectedEffort: null,
   projects: [],
   threads: [],
   threadProjectHints: {},
@@ -141,6 +171,13 @@ export const useStore = create<State>((set, get) => ({
     if (status.state === "error") set({ bootError: status.message ?? "Codex gagal dijalankan" });
   },
 
+  handleClaudeStatus: (status) => {
+    set({ claudeStatus: status });
+    if (status.state === "error") {
+      set((s) => ({ engines: s.engines.map((e) => (e.id === "claude" ? { ...e, available: false, detail: status.message } : e)) }));
+    }
+  },
+
   setProjects: (projects) => set({ projects }),
 
   bootstrap: async () => {
@@ -153,9 +190,12 @@ export const useStore = create<State>((set, get) => ({
       set({
         booted: true,
         status: payload.status,
+        claudeStatus: claudeStatusFromEngine(payload.engines),
+        engines: payload.engines,
         account: payload.account,
         rateLimit: payload.rateLimit,
         models: payload.models,
+        claudeModels: payload.claudeModels,
         projects: payload.projects,
         threads: payload.recentThreads,
         threadProjectHints: payload.threadProjectHints,
@@ -214,7 +254,9 @@ export const useStore = create<State>((set, get) => ({
       set({ notice: null });
       const { thread } = await window.zcodex.newThread({
         projectId,
+        engine: get().selectedEngine,
         model: get().selectedModel,
+        effort: get().selectedEffort,
         approvalPolicy: get().autoApprove ? "on-request" : "untrusted",
         sandbox: "workspace-write",
       });
@@ -228,11 +270,24 @@ export const useStore = create<State>((set, get) => ({
   openThread: async (threadId) => {
     set({ openingThreadId: threadId, notice: null });
     try {
-      const { thread } = await window.zcodex.readThread(threadId);
+      const { thread, effort } = await window.zcodex.readThread(threadId);
       const readThreads = new Set(get().readThreads);
       readThreads.add(threadId);
       persistReadThreads(readThreads);
-      set({ view: "thread", thread: hydrateThread(thread), openingThreadId: null, readThreads });
+      const hydrated = hydrateThread(thread);
+      if (effort) hydrated.effort = effort;
+      set({
+        view: "thread",
+        thread: hydrated,
+        openingThreadId: null,
+        readThreads,
+        selectedEngine: hydrated.engine,
+        selectedEffort: effort ?? get().selectedEffort,
+        selectedModel:
+          hydrated.engine === "claude"
+            ? claudeModelFor(get().claudeModels, hydrated.model ?? get().selectedModel)
+            : get().selectedModel,
+      });
     } catch (err) {
       set({ openingThreadId: null, notice: err instanceof Error ? err.message : String(err) });
     }
@@ -280,6 +335,30 @@ export const useStore = create<State>((set, get) => ({
 
   setSelectedModel: (model) => set({ selectedModel: model }),
 
+  setSelectedEngine: (engine) => {
+    const s = get();
+    if (s.selectedEngine === engine) return;
+    const list = engine === "claude" ? s.claudeModels : s.models;
+    const nextModel =
+      list.find((m) => m.id === (engine === "claude" ? s.selectedModel ?? list[0]?.id : s.selectedModel))?.id ??
+      list.find((m) => m.isDefault && !m.hidden)?.id ??
+      list[0]?.id ??
+      null;
+    set({ selectedEngine: engine, selectedModel: nextModel });
+  },
+
+  applyEffort: async (level) => {
+    const { thread } = get();
+    set({ selectedEffort: level });
+    if (!thread || thread.engine !== "claude") return;
+    set({ thread: { ...thread, effort: level } });
+    try {
+      await window.zcodex.setEffort(thread.threadId, level);
+    } catch (err) {
+      set({ notice: err instanceof Error ? err.message : String(err) });
+    }
+  },
+
   setSelectedProject: (projectId) => set({ selectedProjectId: projectId }),
 
   setSearchOpen: (open) => set({ searchOpen: open }),
@@ -290,3 +369,13 @@ export const useStore = create<State>((set, get) => ({
 
   setNotice: (text) => set({ notice: text }),
 }));
+
+/** Derive the Claude engine status view from the bootstrap engines list. */
+function claudeStatusFromEngine(engines: EngineStatusView[]): CodexStatusView {
+  const claude = engines.find((e) => e.id === "claude");
+  if (!claude) return { state: "starting" };
+  if (!claude.available) {
+    return { state: "error", message: claude.detail ?? "Claude tidak tersedia", version: claude.version, binaryPath: undefined };
+  }
+  return { state: "ready", version: claude.version, binaryPath: undefined };
+}

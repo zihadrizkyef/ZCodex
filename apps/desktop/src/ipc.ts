@@ -1,4 +1,5 @@
 import { BrowserWindow, dialog, ipcMain, shell } from "electron";
+import { homedir } from "node:os";
 import {
   IPC,
   projectIdForCwd,
@@ -6,6 +7,7 @@ import {
   type AccountView,
   type ApprovalResponseRequest,
   type BootstrapPayload,
+  type EngineId,
   type ListThreadsRequest,
   type ModelOption,
   type NewThreadRequest,
@@ -22,22 +24,42 @@ import type {
   Thread,
 } from "@zcodex/codex-protocol";
 import type { CodexHost } from "./codex-host";
+import type { ClaudeHost } from "./claude-host";
+import {
+  claudeSessionMeta,
+  claudeSessionSummary,
+  hydrateClaudeThread,
+  isClaudeThreadId,
+  listClaudeSessions,
+} from "./claude-sessions";
 import type { ProjectStore } from "./projects";
 import { popupMenu } from "./menu";
 import type { MenuId } from "@zcodex/contracts";
 
+/**
+ * Model aliases accepted by `claude --model` when the CLI catalogue cannot be read (fallback only;
+ * the real list — with names like "Sonnet 5" and per-model effort levels — comes from the CLI's
+ * `initialize` handshake, see ClaudeHost.modelOptions()).
+ */
+export const CLAUDE_MODELS: ModelOption[] = [
+  { id: "sonnet", name: "Claude Sonnet", description: "Seimbang, default", hidden: false, isDefault: true, reasoningEfforts: [], defaultReasoningEffort: null },
+  { id: "opus", name: "Claude Opus", description: "Paling kuat", hidden: false, isDefault: false, reasoningEfforts: [], defaultReasoningEffort: null },
+  { id: "haiku", name: "Claude Haiku", description: "Cepat & murah", hidden: false, isDefault: false, reasoningEfforts: [], defaultReasoningEffort: null },
+];
+
 export interface IpcContext {
   host: CodexHost;
+  claude: ClaudeHost;
   store: ProjectStore;
   getWindow: () => BrowserWindow | null;
   broadcastProjects: (projects: ProjectView[]) => void;
 }
 
 /** Server-initiated requests waiting for a user decision, keyed by request id. */
-const pendingApprovals = new Map<string, ServerRequest>();
+const pendingApprovals = new Map<string, { request: ServerRequest; engine: EngineId }>();
 
-export function rememberApproval(request: ServerRequest): void {
-  pendingApprovals.set(String(request.id), request);
+export function rememberApproval(request: ServerRequest, engine: EngineId = "codex"): void {
+  pendingApprovals.set(String(request.id), { request, engine });
 }
 
 function accountView(account: Account | null): AccountView | null {
@@ -101,8 +123,51 @@ function approvalResult(request: ServerRequest, decision: string, answers?: Reco
   }
 }
 
+/** Minimal codex-shaped Thread describing a fresh Claude session, for `newThread`/`startTurn`. */
+function claudeThreadPayload(threadId: string, cwd: string, sessionId: string | null, effort: string | null): { thread: Thread; effort: string | null } {
+  const now = Math.floor(Date.now() / 1000);
+  return {
+    effort,
+    thread: {
+      id: threadId,
+      sessionId: sessionId ?? threadId,
+      forkedFromId: null,
+      parentThreadId: null,
+      preview: "",
+      ephemeral: false,
+      section: null,
+      sectionEnteredAt: null,
+      projectId: null,
+      historyMode: "paginated",
+      modelProvider: "anthropic",
+      model: null,
+      reasoningEffort: null,
+      createdAt: now,
+      updatedAt: now,
+      recencyAt: now,
+      status: { type: "idle" },
+      path: null,
+      cwd,
+      cliVersion: "",
+      originator: null,
+      source: { custom: "claude" },
+      threadSource: null,
+      agentNickname: null,
+      agentRole: null,
+      gitInfo: null,
+      name: null,
+      turns: [],
+    },
+  };
+}
+
+function engineOfThreadId(threadId: string, ctx: IpcContext): EngineId {
+  if (isClaudeThreadId(threadId) || ctx.claude.owns(threadId)) return "claude";
+  return "codex";
+}
+
 export function registerIpc(ctx: IpcContext): void {
-  const { host, store } = ctx;
+  const { host, claude, store } = ctx;
 
   ipcMain.handle(IPC.bootstrap, async (): Promise<BootstrapPayload> => {
     await host.ensureStarted();
@@ -127,8 +192,29 @@ export function registerIpc(ctx: IpcContext): void {
         /* model list is best-effort; the composer falls back to the CLI default */
       }
     }
+    await claude.probe();
     const recentThreads = await listThreads({ limit: 40 });
-    return { status: host.current, account, rateLimit, models, projects, recentThreads, threadProjectHints: hints };
+    const claudeModels = claude.isReady ? claude.modelOptions() : CLAUDE_MODELS;
+    return {
+      status: host.current,
+      account,
+      rateLimit,
+      models,
+      claudeModels,
+      engines: [
+        { id: "codex", label: "Codex", available: host.isReady, version: host.info?.version ?? null },
+        {
+          id: "claude",
+          label: "Claude",
+          available: claude.isReady,
+          version: claude.info?.version ?? null,
+          ...(claude.current.state === "error" ? { detail: claude.current.message } : {}),
+        },
+      ],
+      projects,
+      recentThreads,
+      threadProjectHints: hints,
+    };
   });
 
   ipcMain.handle(IPC.pickProject, async (): Promise<ProjectView | null> => {
@@ -157,51 +243,78 @@ export function registerIpc(ctx: IpcContext): void {
   });
 
   async function listThreads(request: ListThreadsRequest = {}): Promise<ThreadSummary[]> {
-    if (!host.isReady) return [];
-    const client = host.require();
-    const params: Parameters<typeof client.listThreads>[0] = {
-      limit: request.limit ?? 100,
-      sortKey: "updated_at",
-      sortDirection: "desc",
-      archived: request.archived ?? false,
-    };
-    if (request.searchTerm) params.searchTerm = request.searchTerm;
-    let threads: Thread[] = [];
-    try {
-      threads = (await client.listThreads(params)).data ?? [];
-    } catch {
-      return [];
-    }
     const projects = store.list();
     const hints = store.hints();
-    const summaries = threads.map((t) => {
-      const projectId = projectIdForCwd(t.cwd ?? "", projects, hints) ?? t.projectId ?? null;
-      return threadToSummary(t, projectId);
-    });
-    if (request.projectId !== undefined) {
-      if (request.projectId === null) {
-        // "Recents": everything that does not belong to a known project.
-        return summaries.filter((s) => s.projectId === null);
+
+    // --- codex (server-owned threads)
+    let summaries: ThreadSummary[] = [];
+    if (host.isReady) {
+      const client = host.require();
+      const params: Parameters<typeof client.listThreads>[0] = {
+        limit: request.limit ?? 100,
+        sortKey: "updated_at",
+        sortDirection: "desc",
+        archived: request.archived ?? false,
+      };
+      if (request.searchTerm) params.searchTerm = request.searchTerm;
+      try {
+        const threads: Thread[] = (await client.listThreads(params)).data ?? [];
+        summaries = threads.map((t) => {
+          const projectId = projectIdForCwd(t.cwd ?? "", projects, hints) ?? t.projectId ?? null;
+          return threadToSummary(t, projectId);
+        });
+      } catch {
+        /* codex down — sidebar still shows Claude */
       }
-      return summaries.filter((s) => s.projectId === request.projectId);
     }
-    return summaries;
+
+    // --- claude (sessions from ~/.claude/projects)
+    const claudeSessions = listClaudeSessions(500).map((meta) => {
+      const summary = claudeSessionSummary(meta);
+      return { ...summary, projectId: projectIdForCwd(meta.cwd, projects, hints) };
+    });
+
+    const merged = [...summaries, ...claudeSessions].sort((a, b) => b.updatedAt - a.updatedAt);
+    let filtered = merged;
+    if (request.searchTerm) {
+      const q = request.searchTerm.toLowerCase();
+      filtered = filtered.filter(
+        (s) => s.name?.toLowerCase().includes(q) || s.preview.toLowerCase().includes(q),
+      );
+    }
+    if (request.projectId !== undefined) {
+      if (request.projectId === null) return filtered.filter((s) => s.projectId === null);
+      return filtered.filter((s) => s.projectId === request.projectId);
+    }
+    return filtered.slice(0, request.limit ?? 100);
   }
 
   ipcMain.handle(IPC.listThreads, (_event, request: ListThreadsRequest) => listThreads(request));
 
   ipcMain.handle(IPC.readThread, async (_event, threadId: string) => {
+    const claudeThread = hydrateClaudeThread(threadId);
+    if (claudeThread) return { thread: claudeThread, effort: claude.effortOf(threadId) };
     const client = host.require();
     const res = await client.readThread(threadId, true);
     return { thread: res.thread };
   });
 
   ipcMain.handle(IPC.newThread, async (_event, request: NewThreadRequest) => {
-    const client = host.require();
     const project = request.projectId ? store.get(request.projectId) : undefined;
     const cwd = request.cwd ?? project?.roots[0];
     if (!cwd) throw new Error("Pilih project dulu sebelum membuat chat baru");
-    const res = await client.startThread({
+    if (request.engine === "claude") {
+      const mode = request.approvalPolicy === "untrusted" ? "default" : "auto";
+      const res = await claude.startThread({
+        cwd,
+        model: request.model ?? null,
+        effort: request.effort ?? null,
+        permissionMode: mode,
+      });
+      if (project) store.rememberThread(res.id, project.id);
+      return claudeThreadPayload(res.id, cwd, res.sessionId, claude.effortOf(res.id));
+    }
+    const res = await host.require().startThread({
       cwd,
       model: request.model ?? null,
       approvalPolicy: request.approvalPolicy ?? "on-request",
@@ -212,14 +325,27 @@ export function registerIpc(ctx: IpcContext): void {
   });
 
   ipcMain.handle(IPC.renameThread, async (_event, threadId: string, name: string) => {
+    if (engineOfThreadId(threadId, ctx) === "claude") return; // nama sesi Claude diatur sendiri oleh CLI
     await host.require().setThreadName({ threadId, name });
   });
 
   ipcMain.handle(IPC.archiveThread, async (_event, threadId: string) => {
+    if (engineOfThreadId(threadId, ctx) === "claude") return; // arsip sesi Claude belum didukung
     await host.require().archiveThread({ threadId });
   });
 
   ipcMain.handle(IPC.startTurn, async (_event, request: StartTurnRequest) => {
+    const engine = engineOfThreadId(request.threadId, ctx);
+    if (engine === "claude") {
+      const meta = claudeSessionMeta(request.threadId);
+      await claude.resumeThread(request.threadId, {
+        cwd: meta?.cwd ?? homedir(),
+        model: meta?.model ?? null,
+        permissionMode: "default",
+      });
+      claude.send(request.threadId, request.text);
+      return;
+    }
     const client = host.require();
     await client.startTurn({
       threadId: request.threadId,
@@ -228,17 +354,31 @@ export function registerIpc(ctx: IpcContext): void {
     });
   });
 
+  ipcMain.handle(IPC.setEffort, async (_event, threadId: string, level: string) => {
+    if (engineOfThreadId(threadId, ctx) !== "claude") return; // codex effort is part of the model choice
+    claude.setEffort(threadId, level);
+  });
+
   ipcMain.handle(IPC.interruptTurn, async (_event, threadId: string, turnId: string) => {
+    if (engineOfThreadId(threadId, ctx) === "claude") {
+      await claude.interrupt(threadId);
+      return;
+    }
     await host.require().interruptTurn({ threadId, turnId });
   });
 
   ipcMain.handle(IPC.respondApproval, async (_event, response: ApprovalResponseRequest) => {
     const pending = pendingApprovals.get(String(response.requestId));
-    const client = host.require();
     // Nothing pending (already resolved, or the server restarted) — answering would be a no-op.
     if (!pending) return;
     pendingApprovals.delete(String(response.requestId));
-    client.answerServerRequest(pending.id, approvalResult(pending, response.decision, response.answers));
+    if (pending.engine === "claude") {
+      const threadId = (pending.request.params as { threadId?: string }).threadId ?? "";
+      claude.respondApproval(threadId, String(response.requestId), response.decision);
+      return;
+    }
+    const client = host.require();
+    client.answerServerRequest(pending.request.id, approvalResult(pending.request, response.decision, response.answers));
   });
 
   ipcMain.handle(IPC.popupMenu, (_event, menu: MenuId, x: number, y: number) => {

@@ -2,6 +2,7 @@ import { app, BrowserWindow, shell } from "electron";
 import path from "node:path";
 import { IPC, type AppCommand, type ProjectView } from "@zcodex/contracts";
 import { CodexHost } from "./codex-host";
+import { ClaudeHost } from "./claude-host";
 import { ProjectStore } from "./projects";
 import { installApplicationMenu } from "./menu";
 import { registerIpc, rememberApproval } from "./ipc";
@@ -10,6 +11,7 @@ const DEV_URL = process.env.ZCODEX_DEV_URL;
 
 let mainWindow: BrowserWindow | null = null;
 const host = new CodexHost();
+const claude = new ClaudeHost();
 let store: ProjectStore | null = null;
 
 function broadcast(channel: string, payload: unknown): void {
@@ -85,6 +87,7 @@ void app.whenReady().then(async () => {
 
   registerIpc({
     host,
+    claude,
     store,
     getWindow: () => mainWindow,
     broadcastProjects: (projects: ProjectView[]) => broadcast(IPC.onProjectsChanged, projects),
@@ -92,10 +95,18 @@ void app.whenReady().then(async () => {
 
   host.onNotification((notification) => broadcast(IPC.onNotification, notification));
   host.onServerRequest((request) => {
-    rememberApproval(request);
+    rememberApproval(request, "codex");
     broadcast(IPC.onServerRequest, request);
   });
   host.onStatus((status) => broadcast(IPC.onStatus, status));
+
+  // Claude engine: same frames, same channels — the renderer cannot tell the engines apart.
+  claude.onNotification((notification) => broadcast(IPC.onNotification, notification));
+  claude.onServerRequest((request) => {
+    rememberApproval(request, "claude");
+    broadcast(IPC.onServerRequest, request);
+  });
+  claude.onStatus((status) => broadcast(IPC.onClaudeStatus, status));
 
   mainWindow = createWindow();
 
@@ -114,6 +125,7 @@ app.on("window-all-closed", () => {
 
 app.on("before-quit", () => {
   host.dispose();
+  claude.dispose();
 });
 
 app.on("web-contents-created", (_event, contents) => {

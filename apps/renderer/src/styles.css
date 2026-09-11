@@ -358,8 +358,117 @@ button {
 }
 
 .leaf-row.selected {
-  background: var(--surface-active);
+  background: var(--surface-hover);
   color: var(--text);
+}
+
+.engine-badge {
+  flex: none;
+  margin-left: auto;
+  font-size: 9.5px;
+  line-height: 1;
+  padding: 2px 5px;
+  border-radius: 4px;
+  color: var(--text-faint);
+  border: 1px solid var(--border);
+  letter-spacing: 0.02em;
+}
+
+/* ---- effort dial (Claude): Faster ↔ Smarter slider in the composer popover ---- */
+
+.effort-panel {
+  min-width: 236px;
+  padding: 2px 4px 6px;
+}
+
+.effort-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.effort-title {
+  font-size: 12.5px;
+  color: var(--text-dim);
+}
+
+.effort-value {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.effort-ends {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 14px;
+  font-size: 11.5px;
+  color: var(--text-dim);
+}
+
+.effort-track {
+  position: relative;
+  margin-top: 6px;
+  height: 24px;
+  margin-bottom: 12px;
+}
+
+.effort-track input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  position: relative;
+  z-index: 2;
+  width: 100%;
+  height: 24px;
+  margin: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.effort-track input[type="range"]::-webkit-slider-runnable-track {
+  height: 22px;
+  border-radius: 11px;
+  background: #3a4250;
+}
+
+.effort-track input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 28px;
+  height: 18px;
+  margin-top: 2px;
+  border-radius: 6px;
+  background: #eef2f8;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.45);
+}
+
+.effort-ticks {
+  position: absolute;
+  top: 26px;
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  /* half the 28px knob, so every line sits exactly where the knob stops */
+  padding: 0 14px;
+  pointer-events: none;
+}
+
+/* stop marks: short vertical lines under the bar showing where the knob parks */
+.effort-tick {
+  width: 2px;
+  height: 7px;
+  border-radius: 1px;
+  background: rgba(223, 229, 238, 0.26);
+}
+
+.effort-tick.on {
+  background: rgba(223, 229, 238, 0.6);
+}
+
+.effort-tick.current {
+  height: 10px;
+  background: #eef3fb;
 }
 
 .leaf-row .label {

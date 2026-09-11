@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowUp, Check, ChevronDown, Folder, Mic, Plus, Square } from "lucide-react";
+import type { EngineId } from "@zcodex/contracts";
 import { useStore } from "../store";
 import { Dropdown, MenuItem } from "./Dropdown";
+import { EffortSlider, effortLabel } from "./EffortSlider";
 import { modelLabel, shortenPath } from "../lib/format";
 
 const EXAMPLE_PROMPTS = [
@@ -22,8 +24,13 @@ export function Composer(): React.ReactElement {
   const setSelectedProject = useStore((s) => s.setSelectedProject);
   const addProject = useStore((s) => s.addProject);
   const models = useStore((s) => s.models);
+  const claudeModels = useStore((s) => s.claudeModels);
   const selectedModel = useStore((s) => s.selectedModel);
   const setSelectedModel = useStore((s) => s.setSelectedModel);
+  const selectedEngine = useStore((s) => s.selectedEngine);
+  const setSelectedEngine = useStore((s) => s.setSelectedEngine);
+  const selectedEffort = useStore((s) => s.selectedEffort);
+  const applyEffort = useStore((s) => s.applyEffort);
   const autoApprove = useStore((s) => s.autoApprove);
   const setAutoApprove = useStore((s) => s.setAutoApprove);
   const interrupt = useStore((s) => s.interrupt);
@@ -37,7 +44,22 @@ export function Composer(): React.ReactElement {
     () => projects.find((p) => p.id === selectedProjectId) ?? projects[0] ?? null,
     [projects, selectedProjectId],
   );
-  const model = useMemo(() => models.find((m) => m.id === selectedModel), [models, selectedModel]);
+  // A running thread fixes its engine; only a fresh chat can switch engines.
+  const engine: EngineId = thread?.engine ?? selectedEngine;
+  const availableModels = engine === "claude" ? claudeModels : models;
+  const model = useMemo(() => availableModels.find((m) => m.id === selectedModel), [availableModels, selectedModel]);
+  // Claude exposes a manual effort dial per model; Codex carries effort inside the model choice.
+  const effortLevels = engine === "claude" && model?.supportsEffort ? (model.effortLevels ?? []) : [];
+  const effortValue = useMemo(() => {
+    if (!effortLevels.length) return null;
+    const fromThread = thread?.effort ?? null;
+    if (selectedEffort && effortLevels.includes(selectedEffort)) return selectedEffort;
+    if (fromThread && effortLevels.includes(fromThread)) return fromThread;
+    if (model?.defaultReasoningEffort && effortLevels.includes(model.defaultReasoningEffort)) {
+      return model.defaultReasoningEffort;
+    }
+    return effortLevels[Math.min(2, effortLevels.length - 1)];
+  }, [effortLevels, selectedEffort, thread?.effort, model?.defaultReasoningEffort]);
   const working = phase === "working" && Boolean(thread?.activeTurnId);
 
   useEffect(() => {
@@ -138,35 +160,61 @@ export function Composer(): React.ReactElement {
             <button
               type="button"
               className="chip"
-              title={autoApprove ? "Codex boleh jalan tanpa nanya tiap langkah" : "Codex akan minta izin tiap langkah"}
+              title={autoApprove ? "Agent boleh jalan tanpa nanya tiap langkah" : "Agent akan minta izin tiap langkah"}
               onClick={() => setAutoApprove(!autoApprove)}
             >
               <Check size={13} style={{ opacity: autoApprove ? 1 : 0.35 }} />
               Approve for me
             </button>
             <span className="spacer" />
+            {thread ? (
+              <span className="chip engine-chip" title={`Thread ini dijalankan lewat ${engine === "claude" ? "Claude Code" : "Codex"}`}>
+                {engine === "claude" ? "Claude" : "Codex"}
+              </span>
+            ) : (
+              <Dropdown
+                className="chip engine-chip"
+                label={
+                  <>
+                    {engine === "claude" ? "Claude" : "Codex"}
+                    <ChevronDown size={12} />
+                  </>
+                }
+              >
+                {(close) => (
+                  <>
+                    <MenuItem active={engine === "codex"} onClick={() => { setSelectedEngine("codex"); close(); }}>
+                      Codex
+                    </MenuItem>
+                    <MenuItem active={engine === "claude"} onClick={() => { setSelectedEngine("claude"); close(); }}>
+                      Claude
+                    </MenuItem>
+                  </>
+                )}
+              </Dropdown>
+            )}
             <Dropdown
               className="chip"
               align="right"
               label={
                 <>
-                  {modelLabel(model)}
+                  {modelLabel(model, engine === "claude" ? "" : undefined)}
                   <ChevronDown size={12} />
                 </>
               }
             >
               {(close) => (
                 <>
-                  {models.filter((m) => !m.hidden).length === 0 ? (
-                    <MenuItem onClick={close}>Default Codex</MenuItem>
+                  {availableModels.filter((m) => !m.hidden).length === 0 ? (
+                    <MenuItem onClick={close}>{engine === "claude" ? "Default Claude" : "Default Codex"}</MenuItem>
                   ) : null}
-                  {models
+                  {availableModels
                     .filter((m) => !m.hidden)
                     .map((m) => (
                       <MenuItem
                         key={m.id}
                         active={m.id === selectedModel}
-                        hint={m.defaultReasoningEffort ?? undefined}
+                        hint={m.hint ?? (engine === "claude" ? undefined : m.defaultReasoningEffort ?? undefined)}
                         onClick={() => {
                           setSelectedModel(m.id);
                           close();
@@ -178,6 +226,26 @@ export function Composer(): React.ReactElement {
                 </>
               )}
             </Dropdown>
+            {effortValue ? (
+              <Dropdown
+                className="chip effort-chip"
+                align="right"
+                label={
+                  <>
+                    Effort {effortLabel(effortValue)}
+                    <ChevronDown size={12} />
+                  </>
+                }
+              >
+                {() => (
+                  <EffortSlider
+                    levels={effortLevels}
+                    value={effortValue}
+                    onChange={(level) => void applyEffort(level)}
+                  />
+                )}
+              </Dropdown>
+            ) : null}
             <button type="button" className="chip square" title="Voice (belum tersedia)" disabled style={{ opacity: 0.5 }}>
               <Mic size={14} />
             </button>

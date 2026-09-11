@@ -29,6 +29,7 @@ function ThreadRow({
     <button type="button" className={`leaf-row${selected ? " selected" : ""}`} onClick={onOpen} title={label}>
       <span className={unread ? "unread-dot" : "unread-dot placeholder"} />
       <span className="label">{label}</span>
+      {thread.engine === "claude" ? <span className="engine-badge">Claude</span> : null}
     </button>
   );
 }

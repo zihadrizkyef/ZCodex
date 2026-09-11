@@ -46,6 +46,7 @@ function wireBridge(): void {
   window.zcodex.onNotification((notification) => store().handleNotification(notification));
   window.zcodex.onServerRequest((request) => store().handleServerRequest(request));
   window.zcodex.onStatus((status) => store().handleStatus(status));
+  window.zcodex.onClaudeStatus((status) => store().handleClaudeStatus(status));
   window.zcodex.onProjectsChanged((projects) => {
     store().setProjects(projects);
     void store().refreshThreads();

@@ -44,11 +44,13 @@ function ContentHeader(): React.ReactElement {
 
 function Banners(): React.ReactElement | null {
   const status = useStore((s) => s.status);
+  const claudeStatus = useStore((s) => s.claudeStatus);
   const notice = useStore((s) => s.notice);
   const setNotice = useStore((s) => s.setNotice);
 
   const showError = status.state === "error" || status.state === "stopped";
-  if (!showError && !status.versionWarning && !notice) return null;
+  const showClaudeError = claudeStatus.state === "error" || claudeStatus.state === "stopped";
+  if (!showError && !status.versionWarning && !showClaudeError && !notice) return null;
 
   return (
     <>
@@ -69,6 +71,17 @@ function Banners(): React.ReactElement | null {
           <div>
             {status.versionWarning}
             {status.binaryPath ? <div style={{ opacity: 0.8, marginTop: 2 }}>{status.binaryPath}</div> : null}
+          </div>
+        </div>
+      ) : null}
+      {showClaudeError ? (
+        <div className="banner warn">
+          <AlertTriangle size={14} />
+          <div>
+            {claudeStatus.message ?? "Claude tidak tersedia."}
+            <div style={{ opacity: 0.85, marginTop: 2 }}>
+              Pastikan CLI terpasang & sudah login: <code>claude</code> lalu <code>/login</code>
+            </div>
           </div>
         </div>
       ) : null}

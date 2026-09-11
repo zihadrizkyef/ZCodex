@@ -29,8 +29,10 @@ export function relativeTime(unixSeconds: number): string {
 export function modelLabel(model: { name: string; defaultReasoningEffort: string | null } | undefined, effortOverride?: string | null): string {
   if (!model) return "Model default";
   const short = model.name.replace(/^GPT-/i, "").replace(/-/g, " ");
-  const effort = (effortOverride ?? model.defaultReasoningEffort ?? "medium").toString();
-  return `${short} ${effort.charAt(0).toUpperCase()}${effort.slice(1)}`;
+  const effort = effortOverride ?? model.defaultReasoningEffort ?? "medium";
+  // Engines without a reasoning-effort concept (Claude) pass "" to drop the suffix entirely.
+  const suffix = effort ? ` ${effort.charAt(0).toUpperCase()}${effort.slice(1)}` : "";
+  return `${short}${suffix}`;
 }
 
 export function textFromItemText(text: string, max = 120): string {

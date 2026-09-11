@@ -11,6 +11,7 @@ export const IPC = {
   renameThread: "thread:rename",
   archiveThread: "thread:archive",
   startTurn: "turn:start",
+  setEffort: "engine:set-effort",
   interruptTurn: "turn:interrupt",
   respondApproval: "approval:respond",
   popupMenu: "menu:popup",
@@ -21,6 +22,7 @@ export const IPC = {
   onNotification: "codex:notification",
   onServerRequest: "codex:server-request",
   onStatus: "codex:status",
+  onClaudeStatus: "claude:status",
   onProjectsChanged: "app:projects-changed",
   onCommand: "app:command",
 } as const;
